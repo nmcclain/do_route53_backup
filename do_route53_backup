@@ -1,0 +1,50 @@
+#!/usr/bin/python
+import argparse, re, boto
+
+################################################################
+#### quick and dirty nagios/icinga backup of an AWS Route53 zone
+
+def main():
+
+	#### deal with arguments
+	parser = argparse.ArgumentParser()
+	parser.add_argument('-K', '--aws_key_id', help='AWS key ID', required=True)
+	parser.add_argument('-S', '--aws_secret_key', help='AWS secret key', required=True)
+	parser.add_argument('-z', '--zone', help='Route53 domain name', required=True)
+	args = parser.parse_args()
+	# cleanup arguments
+	if not re.match('\.$', args.zone):
+		args.zone += "."
+
+	#### connect/authenticate to AWS
+	route53 = boto.connect_route53( args.aws_key_id, args.aws_secret_key )
+
+	#### confirm this zone exists and we have access to it
+	results = route53.get_all_hosted_zones()
+	allzones = {}
+	for zone in results['ListHostedZonesResponse']['HostedZones']:
+		allzones[zone.Name] = zone
+	if not args.zone in allzones:
+		print "CRITICAL zone not found|"
+		exit(2)
+	zone = allzones[args.zone]
+
+	#### backup RRs by dumping them to the nagios log
+        zone_id = zone.Id.replace('/hostedzone/', '')
+	sets = route53.get_all_rrsets(zone_id)
+	if sets:
+		print "OK backed up RRs for %s|" % (args.zone)
+		for rset in sets:
+		    print "%s: %s %s @ %s" % (rset.name, rset.type, rset.resource_records, rset.ttl)
+		exit(0)
+	else:
+		print "CRITICAL failed to back up RRs for %s|" % (args.zone)
+		exit(2)
+
+	#### done.
+	exit(0)
+
+
+if __name__ == "__main__":
+    main()
+
